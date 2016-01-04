@@ -1,5 +1,5 @@
 import sys
-import urllib2, gzip, StringIO
+import urllib2
 from checks import AgentCheck
 
 
@@ -20,11 +20,4 @@ class WebPageSize(AgentCheck):
         content = response.read()
         response.close()
 
-        fh = StringIO.StringIO(content)
-        reply_zipped = gzip.GzipFile(fileobj=StringIO.StringIO(content))
-
-        reply = reply_zipped.read()
-        reply_zipped.close()
-
         self.gauge('webpage.kb', round(sys.getsizeof(content) / float(1024), 2), tags=["name:{}".format(name)])
-        self.gauge('webpage.characters', len(reply), tags=["characters:{}".format(characters)])
