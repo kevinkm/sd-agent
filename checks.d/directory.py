@@ -59,11 +59,26 @@ class DirectoryCheck(AgentCheck):
         directory_bytes = 0
         directory_files = 0
         for root, dirs, files in walk(directory):
-            if not files:
+            if not files and (not filegauges or directory_files > 20):
                 filetags = list(dirtags)
                 self.gauge("system.disk.directory.file.bytes", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.bytes.count", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.bytes.95percentile", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.bytes.max", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.bytes.median", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.bytes.avg", 0, tags=filetags)                                                            
                 self.gauge("system.disk.directory.file.modified_sec_ago", 0, tags=filetags)
-                self.gauge("system.disk.directory.file.created_sec_ago", 0, tags=filetags)                
+                self.gauge("system.disk.directory.file.modified_sec_ago.count", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.modified_sec_ago.95percentile", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.modified_sec_ago.max", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.modified_sec_ago.median", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.modified_sec_ago.avg", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago.count", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago.95percentile", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago.max", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago.median", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago.avg", 0, tags=filetags)
             for filename in files:
                 filename = join(root, filename)
                 # check if it passes our filter
