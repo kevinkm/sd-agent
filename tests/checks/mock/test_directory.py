@@ -61,6 +61,10 @@ class DirectoryTestCase(AgentCheckTest):
                 'dirtagname': "pattern_check",
                 'pattern': "*.log",
                 'filegauges': filegauges
+            }, {
+                'directory': dir_name,
+                'dirtagname': "empty_check",
+                'filegauges': filegauges
             }
         ]
 
@@ -121,13 +125,15 @@ class DirectoryTestCase(AgentCheckTest):
             elif config.get('recursive'):
                 # 12 files in 'temp_dir' + 5 files in 'tempdir/subfolder'
                 self.assertMetric("system.disk.directory.files", tags=dir_tags, count=1, value=17)
+            elif config.get('empty'):
+                # 0 files in 'empty_dir' 
+                self.assertMetric("system.disk.directory.files", tags=dir_tags, count=0, value=0)                
             else:
                 # 12 files in 'temp_dir'
                 self.assertMetric("system.disk.directory.files", tags=dir_tags, count=1, value=12)
 
         # Raises when coverage < 100%
         self.coverage_report()
-
     def test_file_metrics(self):
         """
         File metric coverage
