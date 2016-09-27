@@ -59,6 +59,11 @@ class DirectoryCheck(AgentCheck):
         directory_bytes = 0
         directory_files = 0
         for root, dirs, files in walk(directory):
+            if not files:
+                filetags = list(dirtags)
+                self.gauge("system.disk.directory.file.bytes", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.modified_sec_ago", 0, tags=filetags)
+                self.gauge("system.disk.directory.file.created_sec_ago", 0, tags=filetags)                
             for filename in files:
                 filename = join(root, filename)
                 # check if it passes our filter
