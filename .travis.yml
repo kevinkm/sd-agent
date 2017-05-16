@@ -1,30 +1,7 @@
-sudo: false
-
-branches:
-  only:
-    - master
-    - /^\d+\.\d+\.x$/  # release forked patches branch.
-    - /^\d+\.\d+\.\d+/ # tags format to we get releases pushed.
-
+sudo: required
 language: python
-python:
-  - 2.6
-  - 2.7
-
-matrix:
-  fast_finish: true
-  include:
-    - os: osx
-      language: generic
-      python:
-      env: TRAVIS_FLAVOR=default
-
-#cache:
-#  directories:
-#    - $HOME/virtualenv/python$TRAVIS_PYTHON_VERSION.9
-#    - vendor/cache
-
-
+services:
+  - docker
 env:
   global:
     - CONCURRENCY=2
@@ -35,6 +12,13 @@ env:
     - VOLATILE_DIR=/tmp
     - DD_CASHER_DIR=/tmp/casher
     - AGENT_VERSION=2.1.6
+    - CACHE_DIR=$HOME/.cache
+    - CACHE_FILE_el6=$CACHE_DIR/el6.tar.gz
+    - CACHE_FILE_el6_i386=$CACHE_DIR/el6_i386.tar.gz
+    - CACHE_FILE_el7=$CACHE_DIR/el7.tar.gz
+    - CACHE_FILE_precise=$CACHE_DIR/precise.tar.gz
+    - CACHE_FILE_PACKAGES_LINUX=$CACHE_DIR/packages_linux.tar.gz
+    - CACHE_FILE_PACKAGES_MAC=/tmp/sd-agent-latest.dmg
   matrix:
     - TRAVIS_FLAVOR=default
     - TRAVIS_FLAVOR=core_integration
@@ -100,29 +84,34 @@ env:
     - TRAVIS_FLAVOR=zookeeper FLAVOR_VERSION=3.4.7
     - TRAVIS_FLAVOR=zookeeper FLAVOR_VERSION=3.3.6
 
-# Override travis defaults with empty jobs
+cache:
+  directories:
+    - $HOME/virtualenv/python$TRAVIS_PYTHON_VERSION.9
+    - vendor/cache
+    - $CACHE_DIR
+
 before_install: echo "OVERRIDING TRAVIS STEPS"
-install: echo "OVERRIDING TRAVIS STEPS"
-before_script: echo "OVERRIDING TRAVIS STEPS"
-
-script:
-  - travis_retry ./.travis/build_installer.sh
-
+install:  pip install softlayer-object-storage==0.5.4
+before_script:
+  - if [ "${TRAVIS_OS_NAME}" != "osx" ]; then sudo apt-get --yes --no-install-recommends install binfmt-support qemu-user-static createrepo reprepro; fi
+  - if [ "${TRAVIS_OS_NAME}" != "osx" ]; then echo ':arm:M::\x7fELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-arm-static:' | sudo tee -a /proc/sys/fs/binfmt_misc/register; fi
+script: travis_retry ./.travis/build_installer.sh
 after_failure:
   - echo "Logs from installation process come here / DEBUG LOGS"
   - cat /tmp/ci.log
 
-notifications:
-  slack:
-    secure: N7WQuQNLn4wJqGHnLmTOZL18NGdr7vKNyHSV0TnXcgijnoqt+yxOq7mEu+h/KLgflAQObyKF8A3ChmbTB99xL6fR8xYVvxLSPk7+g9PU6Vf7absN9yY0rUQfXcPLVyYsZ11R1UqkizYbxc9B2A588S48/TMP2KB6LnII+PNajyg=
-
-deploy:
-  - provider: releases
-    api_key:
-      secure: "Z36hDHOTIfCHG3q6KTKsSA9V3S8QyRqgpZirR2RlWQinJx1xt9K3V8zIG4DheRNYxwB2z8K4tuyEX3JXLovKXfGSDsT7Tq2nfH7YRQlMP3jqNB8H7CzsTQlFdXM8lBXyalSamNVa/UdZZHHBDCQjk8ZKm/TlsBY626d6NdgXwWM="
-    skip_cleanup: true
-    file: sd-agent-$AGENT_VERSION.dmg
-    on:
-      tags: true
-      condition: $TRAVIS_OS_NAME == osx
-      repo: serverdensity/sd-agent
+jobs:
+  include:
+    - stage: build containers
+      script: travis_retry ./.travis/build_containers.sh
+      python: 2.7
+    - stage: build packages
+      script: if [ "${TRAVIS_OS_NAME}" != "osx" ]; then travis_retry ./.travis/build_packages.sh; elif [ "${TRAVIS_OS_NAME}" == "osx" ]; then ./packaging/darwin/build_installer.sh; fi
+      python: 2.7
+    - os: osx
+      language: generic
+      python:
+      env: TRAVIS_FLAVOR=default
+    - stage: upload packages
+      script: travis_retry ./.travis/upload_packages.sh
+      python: 2.7

@@ -9,14 +9,14 @@
 %define        __os_install_post %{_dbpath}/brp-compress
 %global        __venv %{_tmppath}/venv
 %global          longdescription %include description
-%global        __sd_python_version 2.6
+%global        __sd_python_version 2.7
 
 Summary: Server Density Monitoring Agent
 Name: sd-agent
 BuildArch: x86_64 i386
 %include %{_topdir}/inc/version
 %include %{_topdir}/inc/release
-Requires: python >= 2.6, sysstat, libyaml
+Requires: python27, sysstat, libyaml
 BuildRequires: symlinks
 License: Simplified BSD
 Group: System/Monitoring
@@ -32,7 +32,7 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 %prep
 curl -LO https://pypi.python.org/packages/source/v/virtualenv/virtualenv-13.1.2.tar.gz
 tar xzf virtualenv-13.1.2.tar.gz
-python virtualenv-13.1.2/virtualenv.py %{__venv}
+python2.7 virtualenv-13.1.2/virtualenv.py %{__venv}
 
 %setup -qn sd-agent
 %{__venv}/bin/python %{__venv}/bin/pip install -r requirements.txt
