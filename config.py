@@ -378,7 +378,7 @@ def get_config(parse_args=True, cfg_path=None, options=None, can_query_registry=
             log.warning(u"No agent key was found. Aborting.")
             sys.exit(2)
 
-        if not config.has_option('Main', 'sd_url') or not config.has_option('Main', 'sd_account'):
+        if not (config.has_option('Main', 'sd_url') or config.has_option('Main', 'sd_account')):
             log.warning(u"No sd_account or sd_url was found. Aborting.")
             sys.exit(2)
 
