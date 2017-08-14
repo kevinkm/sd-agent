@@ -97,7 +97,7 @@ def get_parsed_args():
     parser.add_option('-A', '--autorestart', action='store_true', default=False,
                       dest='autorestart')
     parser.add_option('-s', '--sd_url', action='store', default=None,
-                      dest='sd_url')
+                      dest='sdiscovery_url')
     parser.add_option('-u', '--use-local-forwarder', action='store_true',
                       default=False, dest='use_forwarder')
     parser.add_option('-v', '--verbose', action='store_true', default=False,
@@ -111,7 +111,7 @@ def get_parsed_args():
     except SystemExit:
         # Ignore parse errors
         options, args = Values({'autorestart': False,
-                                'sd_url': None,
+                                'sdiscovery_url': None,
                                 'use_forwarder': False,
                                 'verbose': False,
                                 'profile': False}), []
@@ -138,8 +138,18 @@ def _version_string_to_tuple(version_string):
 
 
 # Return url endpoint, here because needs access to version number
-def get_url_endpoint(default_url, endpoint_type='app'):
-    return "https://{0}.agent.serverdensity.io".format(default_url)
+def get_url_endpoint(default_url, endpoint_type='app',cfg_path=None):
+    config_path = get_config_path(cfg_path, os_name=get_os())
+    config = ConfigParser.ConfigParser()
+    config.readfp(skip_leading_wsp(open(config_path)))
+    if config.has_option('Main', 'sd_url'):
+        url = config.get('Main', 'sd_url')
+    else:
+        # Default agent URL
+        url = "https://" + agentConfig['sd_account'] + ".agent.serverdensity.io"
+    if url.endswith('/'):
+        url = url[:-1]
+    return url
 
 
 def skip_leading_wsp(f):
@@ -331,7 +341,7 @@ def get_config(parse_args=True, cfg_path=None, options=None, can_query_registry=
         'check_freq': DEFAULT_CHECK_FREQUENCY,
         'collect_orchestrator_tags': True,
         'dogstatsd_port': 8125,
-        'dogstatsd_target': 'http://localhost:17123',
+        'dogstatsd_target': 'http://localhost:17124',
         'graphite_listen_port': None,
         'hostname': None,
         'listen_port': None,
@@ -411,24 +421,25 @@ def get_config(parse_args=True, cfg_path=None, options=None, can_query_registry=
         """
         endpoints = {}
         agentConfig['endpoints'] = endpoints
+        if config.has_option('Main', 'sd_account'):
+            agentConfig['sd_account'] = config.get('Main', 'sd_account')
+        agentConfig['use_forwarder'] = False
 
-        # Forwarder or not forwarder
-        agentConfig['use_forwarder'] = options is not None and options.use_forwarder
-        if agentConfig['use_forwarder']:
+        if options is not None and options.use_forwarder:
             listen_port = 17124
             if config.has_option('Main', 'listen_port'):
                 listen_port = int(config.get('Main', 'listen_port'))
-            agentConfig['sd_url'] = "http://{}:{}".format(agentConfig['bind_host'], listen_port)
-        # FIXME: Legacy sd_url command line switch
-        elif options is not None and options.sd_url is not None:
-            agentConfig['sd_url'] = options.sd_url
-        elif config.has_option('Main', 'sd_url'):
+            #agentConfig['sd_url'] = "http://" + agentConfig['bind_host'] + ":" + str(listen_port)
+            agentConfig['use_forwarder'] = True
+
+        if config.has_option('Main', 'sd_url'):
             agentConfig['sd_url'] = config.get('Main', 'sd_url')
         else:
             # Default agent URL
-            agentConfig['sd_url'] = "https://" + config.get('Main', 'sd_account') + ".agent.serverdensity.io"
+            agentConfig['sd_url'] = "https://" + agentConfig['sd_account'] + ".agent.serverdensity.io"
         if agentConfig['sd_url'].endswith('/'):
             agentConfig['sd_url'] = agentConfig['sd_url'][:-1]
+        agentConfig['endpoints'] = agentConfig['sd_url']
 
         # Forwarder timeout
         agentConfig['forwarder_timeout'] = 20
@@ -503,7 +514,7 @@ def get_config(parse_args=True, cfg_path=None, options=None, can_query_registry=
         # Dogstatsd config
         dogstatsd_defaults = {
             'dogstatsd_port': 8125,
-            'dogstatsd_target': 'http://' + agentConfig['bind_host'] + ':17123',
+            'dogstatsd_target': 'http://' + agentConfig['bind_host'] + ':17124',
         }
         for key, value in dogstatsd_defaults.iteritems():
             if config.has_option('Main', key):

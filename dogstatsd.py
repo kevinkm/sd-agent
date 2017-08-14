@@ -16,6 +16,7 @@ from utils.proxy import set_no_proxy_settings  # noqa
 set_no_proxy_settings()
 
 # stdlib
+from hashlib import md5
 import os
 import logging
 import optparse
@@ -47,6 +48,7 @@ from utils.net import inet_pton
 from utils.net import IPV6_V6ONLY, IPPROTO_IPV6
 from utils.pidfile import PidFile
 from utils.watchdog import Watchdog
+from config import get_version
 
 # urllib3 logs a bunch of stuff at the info level
 requests_log = logging.getLogger("requests.packages.urllib3")
@@ -81,16 +83,17 @@ def add_serialization_status_metric(status, hostname):
     """
     interval = 10.0
     value = 1
-    return {
-        'tags': ["status:{0}".format(status)],
-        'metric': 'datadog.dogstatsd.serialization_status',
-        'interval': interval,
-        'device_name': None,
-        'host': hostname,
-        'points': [(time(), value / interval)],
-        'type': MetricTypes.RATE,
-    }
-
+    return (
+        'serverdensity.dogstatsd.serialization_status',
+        time(),
+        value / interval,
+            {
+            'hostname': hostname,
+            'type': MetricTypes.RATE,
+            'device_name': None,
+            'tags': ["status:{0}".format(status)],
+        }
+    )
 
 def unicode_metrics(metrics):
     for i, metric in enumerate(metrics):
@@ -107,24 +110,25 @@ def unicode_metrics(metrics):
     return metrics
 
 
-def serialize_metrics(metrics, hostname):
+def serialize_metrics(metrics, hostname, agent_key):
     try:
         metrics.append(add_serialization_status_metric("success", hostname))
-        serialized = json.dumps({"series": metrics})
+        serialized = json.dumps({"metrics": metrics,"agentKey" : agent_key,"sdAgentVersion": 2.0,"collection_timestamp":time(),"agentVersion": get_version() })
     except UnicodeDecodeError as e:
         log.exception("Unable to serialize payload. Trying to replace bad characters. %s", e)
         metrics.append(add_serialization_status_metric("failure", hostname))
         try:
             log.error(metrics)
-            serialized = json.dumps({"series": unicode_metrics(metrics)})
+            serialized = json.dumps({"metrics": unicode_metrics(metrics),"agentKey" : agent_key,"sdAgentVersion": 2.0,"collection_timestamp":time(),"agentVersion": get_version()})
         except Exception as e:
             log.exception("Unable to serialize payload. Giving up. %s", e)
-            serialized = json.dumps({"series": [add_serialization_status_metric("permanent_failure", hostname)]})
+            serialized = json.dumps({"metrics": [add_serialization_status_metric("permanent_failure", hostname)],"agentKey" : agent_key,"sdAgentVersion": 2.0,"collection_timestamp":time(),"agentVersion": get_version()})
 
     if len(serialized) > COMPRESS_THRESHOLD:
         headers = {'Content-Type': 'application/json',
-                   'Content-Encoding': 'deflate'}
-        serialized = zlib.compress(serialized)
+                   #'Content-Encoding': 'deflate'
+                   }
+        #serialized = zlib.compress(serialized)
     else:
         headers = {'Content-Type': 'application/json'}
     return serialized, headers
@@ -189,7 +193,7 @@ class Reporter(threading.Thread):
     server.
     """
 
-    def __init__(self, interval, metrics_aggregator, api_host, api_key=None,
+    def __init__(self, interval, metrics_aggregator, sd_url, agent_key=None,
                  use_watchdog=False, event_chunk_size=None):
         threading.Thread.__init__(self)
         self.interval = int(interval)
@@ -203,8 +207,8 @@ class Reporter(threading.Thread):
         if use_watchdog:
             self.watchdog = Watchdog.create(WATCHDOG_TIMEOUT)
 
-        self.api_key = api_key
-        self.api_host = api_host
+        self.agent_key = agent_key
+        self.sd_url = sd_url
         self.event_chunk_size = event_chunk_size or EVENT_CHUNK_SIZE
 
     def stop(self):
@@ -213,7 +217,7 @@ class Reporter(threading.Thread):
 
     def run(self):
 
-        log.info("Reporting to %s every %ss" % (self.api_host, self.interval))
+        log.info("Reporting to %s every %ss" % (self.sd_url, self.interval))
         log.debug("Watchdog enabled: %s" % bool(self.watchdog))
 
         # Persist a start-up message.
@@ -221,7 +225,7 @@ class Reporter(threading.Thread):
 
         while not self.finished.isSet():  # Use camel case isSet for 2.4 support.
             self.finished.wait(self.interval)
-            self.metrics_aggregator.send_packet_count('datadog.dogstatsd.packet.count')
+            self.metrics_aggregator.send_packet_count('serverdensity.dogstatsd.packet.count')
             self.flush()
             if self.watchdog:
                 self.watchdog.reset()
@@ -280,11 +284,11 @@ class Reporter(threading.Thread):
                 log.exception("Error flushing metrics")
 
     def submit(self, metrics):
-        body, headers = serialize_metrics(metrics, self.hostname)
+        body, headers = serialize_metrics(metrics, self.hostname, self.agent_key)
         params = {}
-        if self.api_key:
-            params['api_key'] = self.api_key
-        url = '%s/api/v1/series?%s' % (self.api_host, urlencode(params))
+        if self.agent_key:
+            params['agent_key'] = self.agent_key
+        url = "{0}/intake/{1}?agent_key={2}".format(self.sd_url, "", params['agent_key'])
         self.submit_http(url, body, headers)
 
     def submit_events(self, events):
@@ -293,7 +297,7 @@ class Reporter(threading.Thread):
 
         for chunk in chunks(events, event_chunk_size):
             payload = {
-                'apiKey': self.api_key,
+                'agentKey': self.agent_key,
                 'events': {
                     'api': chunk
                 },
@@ -301,14 +305,15 @@ class Reporter(threading.Thread):
                 'internalHostname': get_hostname()
             }
             params = {}
-            if self.api_key:
-                params['api_key'] = self.api_key
-            url = '%s/intake?%s' % (self.api_host, urlencode(params))
+            if self.agent_key:
+                params['agent_key'] = self.agent_key
+            url = '%s/intake?%s' % (self.sd_url, urlencode(params))
 
             self.submit_http(url, json.dumps(payload), headers)
 
     def submit_http(self, url, data, headers):
         headers["DD-Dogstatsd-Version"] = get_version()
+        headers["Content-MD5"] = str(md5(data).hexdigest())
         log.debug("Posting payload to %s" % url)
         try:
             start_time = time()
@@ -329,13 +334,14 @@ class Reporter(threading.Thread):
                 pass
 
     def submit_service_checks(self, service_checks):
+        return
         headers = {'Content-Type':'application/json'}
 
         params = {}
-        if self.api_key:
-            params['api_key'] = self.api_key
+        if self.agent_key:
+            params['agent_key'] = self.agent_key
 
-        url = '{0}/api/v1/check_run?{1}'.format(self.api_host, urlencode(params))
+        url = '{0}/api/v1/check_run?{1}'.format(self.sd_url, urlencode(params))
         self.submit_http(url, json.dumps(service_checks), headers)
 
 
@@ -495,7 +501,7 @@ def init(config_path=None, use_watchdog=False, use_forwarder=False, args=None):
 
     port = c['dogstatsd_port']
     interval = DOGSTATSD_FLUSH_INTERVAL
-    api_key = c['api_key']
+    agent_key = c['agent_key']
     aggregator_interval = DOGSTATSD_AGGREGATOR_BUCKET_SIZE
     non_local_traffic = c['non_local_traffic']
     forward_to_host = c.get('statsd_forward_host')
@@ -508,6 +514,7 @@ def init(config_path=None, use_watchdog=False, use_forwarder=False, args=None):
     if use_forwarder:
         target = c['dogstatsd_target']
 
+    log.debug(target)
     hostname = get_hostname(c)
     log.debug("Using hostname \"%s\"", hostname)
 
@@ -526,7 +533,7 @@ def init(config_path=None, use_watchdog=False, use_forwarder=False, args=None):
     )
 
     # Start the reporting thread.
-    reporter = Reporter(interval, aggregator, target, api_key, use_watchdog, event_chunk_size)
+    reporter = Reporter(interval, aggregator, target, agent_key, use_watchdog, event_chunk_size)
 
     # NOTICE: when `non_local_traffic` is passed we need to bind to any interface on the box. The forwarder uses
     # Tornado which takes care of sockets creation (more than one socket can be used at once depending on the
